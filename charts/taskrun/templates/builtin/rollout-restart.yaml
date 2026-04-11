@@ -1,0 +1,21 @@
+apiVersion: taskrun.io/v1alpha1
+kind: ClusterStepDefinition
+metadata:
+  name: rollout-restart
+spec:
+  schema:
+    type: object
+    required: [kind, name]
+    properties:
+      kind:
+        type: string
+        enum: [Deployment, StatefulSet, DaemonSet]
+      name:
+        type: string
+      namespace:
+        type: string
+        description: "Defaults to the TaskRun namespace if omitted"
+  outputs:
+    - name: restarted
+      description: "Whether the rollout restart was triggered"
+  authAware: false

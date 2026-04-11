@@ -1,0 +1,23 @@
+apiVersion: taskrun.io/v1alpha1
+kind: ClusterStepDefinition
+metadata:
+  name: mongo-command
+spec:
+  schema:
+    type: object
+    required: [connectionString, database, command]
+    properties:
+      connectionString:
+        type: string
+        description: "MongoDB connection string or template expression"
+      database:
+        type: string
+      command:
+        type: string
+        description: "MongoDB command as JSON"
+  runner:
+    image: ghcr.io/davidkenelm/taskrun-runners/mongo:0.1.0
+  outputs:
+    - name: result
+      description: "Command result as JSON"
+  authAware: true

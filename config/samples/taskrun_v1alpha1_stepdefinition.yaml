@@ -1,0 +1,9 @@
+apiVersion: taskrun.taskrun.io/v1alpha1
+kind: StepDefinition
+metadata:
+  labels:
+    app.kubernetes.io/name: taskrun
+    app.kubernetes.io/managed-by: kustomize
+  name: stepdefinition-sample
+spec:
+  # TODO(user): Add fields here

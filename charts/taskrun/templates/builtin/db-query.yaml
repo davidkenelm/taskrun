@@ -1,0 +1,28 @@
+apiVersion: taskrun.io/v1alpha1
+kind: ClusterStepDefinition
+metadata:
+  name: db-query
+spec:
+  schema:
+    type: object
+    required: [connectionString, query]
+    properties:
+      connectionString:
+        type: string
+        description: "Postgres connection string or template expression"
+      query:
+        type: string
+        description: "Parameterized SQL query"
+      params:
+        type: array
+        items:
+          type: string
+        description: "Positional query parameters"
+  runner:
+    image: ghcr.io/davidkenelm/taskrun-runners/db-query:0.1.0
+  outputs:
+    - name: rows
+      description: "Query result rows as JSON array"
+    - name: rowCount
+      description: "Number of rows returned or affected"
+  authAware: true

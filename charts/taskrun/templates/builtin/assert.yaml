@@ -1,0 +1,17 @@
+apiVersion: taskrun.io/v1alpha1
+kind: ClusterStepDefinition
+metadata:
+  name: assert
+spec:
+  schema:
+    type: object
+    required: [expression]
+    properties:
+      expression:
+        type: string
+        description: "CEL expression evaluated against step outputs. Fails the TaskRun if false."
+      message:
+        type: string
+        description: "Error message when assertion fails"
+  outputs: []
+  authAware: false

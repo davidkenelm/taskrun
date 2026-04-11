@@ -1,0 +1,27 @@
+apiVersion: taskrun.io/v1alpha1
+kind: ClusterStepDefinition
+metadata:
+  name: shell-exec
+spec:
+  schema:
+    type: object
+    required: [image, command]
+    properties:
+      image:
+        type: string
+        description: "Container image to run the command in"
+      command:
+        type: string
+        description: "Shell command to execute"
+      args:
+        type: array
+        items:
+          type: string
+  runner:
+    image: ""  # user-provided via params.image
+  outputs:
+    - name: stdout
+      description: "Standard output from the command"
+    - name: exitCode
+      description: "Exit code of the command"
+  authAware: true

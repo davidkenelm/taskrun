@@ -1,0 +1,21 @@
+apiVersion: taskrun.io/v1alpha1
+kind: ClusterStepDefinition
+metadata:
+  name: configmap-update
+spec:
+  schema:
+    type: object
+    required: [configMapName, key]
+    properties:
+      configMapName:
+        type: string
+      key:
+        type: string
+      valueFrom:
+        type: string
+      value:
+        type: string
+  outputs:
+    - name: updated
+      description: "Whether the ConfigMap was created or patched"
+  authAware: false
