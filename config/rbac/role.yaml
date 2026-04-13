@@ -13,6 +13,7 @@ rules:
   - create
   - get
   - patch
+  - update
 - apiGroups:
   - ""
   resources:
@@ -31,6 +32,7 @@ rules:
   verbs:
   - get
   - patch
+  - update
 - apiGroups:
   - batch
   resources:
