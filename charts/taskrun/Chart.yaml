@@ -1,0 +1,12 @@
+apiVersion: v2
+name: taskrun
+description: A Kubernetes operator for declarative, typed Jobs and CronJobs
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - operator
+  - jobs
+  - cronjobs
+  - taskrun

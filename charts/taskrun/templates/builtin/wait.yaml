@@ -1,0 +1,16 @@
+apiVersion: taskrun.io/v1alpha1
+kind: ClusterStepDefinition
+metadata:
+  name: wait
+spec:
+  schema:
+    type: object
+    properties:
+      duration:
+        type: string
+        description: "Duration to wait (e.g. 30s, 5m)"
+      timeout:
+        type: string
+        description: "Maximum time to wait before failing"
+  outputs: []
+  authAware: false

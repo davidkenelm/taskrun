@@ -1,0 +1,33 @@
+apiVersion: taskrun.io/v1alpha1
+kind: ClusterStepDefinition
+metadata:
+  name: http-request
+spec:
+  schema:
+    type: object
+    required: [url, method]
+    properties:
+      url:
+        type: string
+      method:
+        type: string
+        enum: [GET, POST, PUT, DELETE, PATCH]
+      headers:
+        type: object
+        additionalProperties:
+          type: string
+      body:
+        type: string
+      expectedStatus:
+        type: integer
+        default: 200
+  runner:
+    image: ghcr.io/davidkenelm/taskrun-runners/http:0.1.0
+  outputs:
+    - name: body
+      description: Response body
+    - name: statusCode
+      description: HTTP status code
+    - name: headers
+      description: Response headers as JSON
+  authAware: true

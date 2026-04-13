@@ -1,0 +1,6 @@
+## Append samples of your project ##
+resources:
+- taskrun_v1alpha1_taskrun.yaml
+- taskrun_v1alpha1_stepdefinition.yaml
+- taskrun_v1alpha1_clusterstepdefinition.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
