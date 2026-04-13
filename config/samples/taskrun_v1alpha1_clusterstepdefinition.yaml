@@ -1,4 +1,4 @@
-apiVersion: taskrun.taskrun.io/v1alpha1
+apiVersion: taskrun.io/v1alpha1
 kind: ClusterStepDefinition
 metadata:
   labels:

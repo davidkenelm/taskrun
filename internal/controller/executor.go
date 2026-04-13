@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -142,9 +143,7 @@ func (e *StepExecutor) rolloutRestart(ctx context.Context, params map[string]str
 		if dep.Spec.Template.Annotations == nil {
 			dep.Spec.Template.Annotations = make(map[string]string)
 		}
-		for k, v := range restartAnnotation {
-			dep.Spec.Template.Annotations[k] = v
-		}
+		maps.Copy(dep.Spec.Template.Annotations, restartAnnotation)
 		if err := e.client.Update(ctx, &dep); err != nil {
 			return nil, fmt.Errorf("restarting Deployment %s/%s: %w", ns, name, err)
 		}
@@ -157,9 +156,7 @@ func (e *StepExecutor) rolloutRestart(ctx context.Context, params map[string]str
 		if sts.Spec.Template.Annotations == nil {
 			sts.Spec.Template.Annotations = make(map[string]string)
 		}
-		for k, v := range restartAnnotation {
-			sts.Spec.Template.Annotations[k] = v
-		}
+		maps.Copy(sts.Spec.Template.Annotations, restartAnnotation)
 		if err := e.client.Update(ctx, &sts); err != nil {
 			return nil, fmt.Errorf("restarting StatefulSet %s/%s: %w", ns, name, err)
 		}
@@ -172,9 +169,7 @@ func (e *StepExecutor) rolloutRestart(ctx context.Context, params map[string]str
 		if ds.Spec.Template.Annotations == nil {
 			ds.Spec.Template.Annotations = make(map[string]string)
 		}
-		for k, v := range restartAnnotation {
-			ds.Spec.Template.Annotations[k] = v
-		}
+		maps.Copy(ds.Spec.Template.Annotations, restartAnnotation)
 		if err := e.client.Update(ctx, &ds); err != nil {
 			return nil, fmt.Errorf("restarting DaemonSet %s/%s: %w", ns, name, err)
 		}
@@ -263,7 +258,7 @@ func (e *StepExecutor) wait(ctx context.Context, params map[string]string) (map[
 	}
 }
 
-func (e *StepExecutor) assert(ctx context.Context, params map[string]string) (map[string]string, error) {
+func (e *StepExecutor) assert(_ context.Context, params map[string]string) (map[string]string, error) {
 	expression := params["expression"]
 	message := params["message"]
 	if message == "" {

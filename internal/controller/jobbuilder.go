@@ -217,7 +217,7 @@ func (b *JobBuilder) authInitContainer(auth *taskrunv1alpha1.AuthSpec) corev1.Co
 	return c
 }
 
-func (b *JobBuilder) buildVolumes(taskRun *taskrunv1alpha1.TaskRun) []corev1.Volume {
+func (b *JobBuilder) buildVolumes(_ *taskrunv1alpha1.TaskRun) []corev1.Volume {
 	volumes := []corev1.Volume{
 		{
 			Name: stepVolumeName,

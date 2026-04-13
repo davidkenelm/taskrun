@@ -19,17 +19,17 @@ package controller
 import (
 	"testing"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	taskrunv1alpha1 "github.com/davidkenelm/taskrun/api/v1alpha1"
 )
 
-func testTaskRun(name, namespace string) *taskrunv1alpha1.TaskRun {
+func testTaskRun(name string) *taskrunv1alpha1.TaskRun {
 	return &taskrunv1alpha1.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: "default",
 			UID:       "test-uid-123",
 		},
 		Spec: taskrunv1alpha1.TaskRunSpec{
@@ -59,7 +59,7 @@ func testRunnerSteps() []ResolvedStep {
 func TestJobBuilder_Build_BasicJob(t *testing.T) {
 	scheme := newTestScheme()
 	builder := NewJobBuilder(scheme)
-	tr := testTaskRun("my-task", "default")
+	tr := testTaskRun("my-task")
 
 	job, err := builder.Build(tr, testRunnerSteps())
 	if err != nil {
@@ -94,7 +94,7 @@ func TestJobBuilder_Build_BasicJob(t *testing.T) {
 func TestJobBuilder_Build_WithAuth(t *testing.T) {
 	scheme := newTestScheme()
 	builder := NewJobBuilder(scheme)
-	tr := testTaskRun("auth-task", "default")
+	tr := testTaskRun("auth-task")
 	tr.Spec.Auth = &taskrunv1alpha1.AuthSpec{
 		Type:          taskrunv1alpha1.AuthTypeOIDC,
 		TokenEndpoint: "https://auth.example.com/token",
@@ -121,7 +121,7 @@ func TestJobBuilder_Build_WithAuth(t *testing.T) {
 func TestJobBuilder_Build_NoRunnerSteps(t *testing.T) {
 	scheme := newTestScheme()
 	builder := NewJobBuilder(scheme)
-	tr := testTaskRun("no-runner", "default")
+	tr := testTaskRun("no-runner")
 
 	job, err := builder.Build(tr, nil)
 	if err != nil {
@@ -135,7 +135,7 @@ func TestJobBuilder_Build_NoRunnerSteps(t *testing.T) {
 func TestJobBuilder_Build_SharedVolume(t *testing.T) {
 	scheme := newTestScheme()
 	builder := NewJobBuilder(scheme)
-	tr := testTaskRun("vol-task", "default")
+	tr := testTaskRun("vol-task")
 
 	job, err := builder.Build(tr, testRunnerSteps())
 	if err != nil {
@@ -165,7 +165,7 @@ func TestJobBuilder_Build_SharedVolume(t *testing.T) {
 func TestJobBuilder_Build_Labels(t *testing.T) {
 	scheme := newTestScheme()
 	builder := NewJobBuilder(scheme)
-	tr := testTaskRun("labeled", "default")
+	tr := testTaskRun("labeled")
 
 	job, err := builder.Build(tr, testRunnerSteps())
 	if err != nil {
@@ -183,7 +183,7 @@ func TestJobBuilder_Build_Labels(t *testing.T) {
 func TestJobBuilder_Build_OwnerRef(t *testing.T) {
 	scheme := newTestScheme()
 	builder := NewJobBuilder(scheme)
-	tr := testTaskRun("owned", "default")
+	tr := testTaskRun("owned")
 
 	job, err := builder.Build(tr, testRunnerSteps())
 	if err != nil {
@@ -201,7 +201,7 @@ func TestJobBuilder_Build_OwnerRef(t *testing.T) {
 func TestJobBuilder_BuildCronJob(t *testing.T) {
 	scheme := newTestScheme()
 	builder := NewJobBuilder(scheme)
-	tr := testTaskRun("scheduled", "default")
+	tr := testTaskRun("scheduled")
 	tr.Spec.Schedule = "*/5 * * * *"
 	tr.Spec.ConcurrencyPolicy = taskrunv1alpha1.ConcurrencyPolicyForbid
 
@@ -221,7 +221,7 @@ func TestJobBuilder_BuildCronJob(t *testing.T) {
 func TestJobBuilder_MultipleRunnerSteps(t *testing.T) {
 	scheme := newTestScheme()
 	builder := NewJobBuilder(scheme)
-	tr := testTaskRun("multi", "default")
+	tr := testTaskRun("multi")
 
 	steps := []ResolvedStep{
 		{

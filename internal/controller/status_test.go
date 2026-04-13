@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	taskrunv1alpha1 "github.com/davidkenelm/taskrun/api/v1alpha1"
 )

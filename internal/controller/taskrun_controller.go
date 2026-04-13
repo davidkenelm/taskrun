@@ -294,7 +294,7 @@ func (r *TaskRunReconciler) collectRunnerLogs(ctx context.Context, taskRun *task
 			continue
 		}
 		logBytes, err := io.ReadAll(stream)
-		stream.Close()
+		_ = stream.Close()
 		if err != nil {
 			log.Error(err, "Failed to read logs for container", "container", containerName)
 			continue

@@ -33,11 +33,6 @@ import (
 )
 
 var _ = Describe("TaskRun Controller", func() {
-	const (
-		timeout  = 10 * time.Second
-		interval = 250 * time.Millisecond
-	)
-
 	Context("When reconciling a TaskRun with only API-native steps", func() {
 		const taskRunName = "test-api-native"
 		const namespace = "default"
@@ -111,7 +106,7 @@ var _ = Describe("TaskRun Controller", func() {
 				NamespacedName: types.NamespacedName{Name: taskRunName, Namespace: namespace},
 			})
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeFalse())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify TaskRun status.
 			var taskRun taskrunv1alpha1.TaskRun
