@@ -27,6 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+const restartedTrue = "true"
+
 func TestExecutor_SecretUpdate_Create(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newTestScheme()).Build()
 	executor := NewStepExecutor(c, "default")
@@ -154,7 +156,7 @@ func TestExecutor_RolloutRestart_Deployment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outputs["restarted"] != "true" {
+	if outputs["restarted"] != restartedTrue {
 		t.Errorf("expected restarted=true, got %q", outputs["restarted"])
 	}
 
@@ -275,7 +277,7 @@ func TestExecutor_RolloutRestart_StatefulSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outputs["restarted"] != "true" {
+	if outputs["restarted"] != restartedTrue {
 		t.Errorf("expected restarted=true, got %q", outputs["restarted"])
 	}
 
@@ -307,7 +309,7 @@ func TestExecutor_RolloutRestart_DaemonSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outputs["restarted"] != "true" {
+	if outputs["restarted"] != restartedTrue {
 		t.Errorf("expected restarted=true, got %q", outputs["restarted"])
 	}
 

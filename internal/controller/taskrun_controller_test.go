@@ -549,7 +549,7 @@ var _ = Describe("TaskRun Controller", func() {
 
 		BeforeEach(func() {
 			ensureCSD("secret-read", taskrunv1alpha1.StepDefinitionSpec{
-				Schema: &runtime.RawExtension{Raw: []byte(`{"type":"object","required":["secretName","key"]}`)},
+				Schema:  &runtime.RawExtension{Raw: []byte(`{"type":"object","required":["secretName","key"]}`)},
 				Outputs: []taskrunv1alpha1.OutputSpec{{Name: "value"}},
 			})
 			// secret-update CSD already created in an earlier context; use ensureCSD to be safe.
