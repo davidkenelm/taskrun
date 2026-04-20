@@ -19,6 +19,7 @@ package controller
 import (
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -73,7 +74,7 @@ func TestJobBuilder_Build_BasicJob(t *testing.T) {
 		t.Errorf("expected namespace 'default', got %q", job.Namespace)
 	}
 
-	// Should have 1 init container (the runner step) and 1 main container (pause).
+	// Should have 1 init container (the runner step) and 1 main container (collector).
 	pod := job.Spec.Template.Spec
 	if len(pod.InitContainers) != 1 {
 		t.Fatalf("expected 1 init container, got %d", len(pod.InitContainers))
@@ -88,6 +89,60 @@ func TestJobBuilder_Build_BasicJob(t *testing.T) {
 	}
 	if init.Image != "ghcr.io/davidkenelm/taskrun-runners/http:0.1.0" {
 		t.Errorf("unexpected image: %q", init.Image)
+	}
+
+	main := pod.Containers[0]
+	if main.Name != "collect-outputs" {
+		t.Errorf("expected main container 'collect-outputs', got %q", main.Name)
+	}
+	if main.Image != collectorImage {
+		t.Errorf("expected collector image, got %q", main.Image)
+	}
+}
+
+func TestJobBuilder_Build_RunnerContract(t *testing.T) {
+	scheme := newTestScheme()
+	builder := NewJobBuilder(scheme)
+	tr := testTaskRun("contract-task")
+
+	job, err := builder.Build(tr, testRunnerSteps())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	init := job.Spec.Template.Spec.InitContainers[0]
+
+	// Command must be exactly /runner — params are NOT passed as CLI args.
+	if len(init.Command) != 1 || init.Command[0] != "/runner" {
+		t.Errorf("expected command [/runner], got %v", init.Command)
+	}
+	for _, arg := range init.Args {
+		if arg == "--params" {
+			t.Error("params must not be passed as a CLI arg; use the params file")
+		}
+	}
+
+	// STEP_NAME env var must be set so the runner knows which params file to read.
+	found := false
+	for _, env := range init.Env {
+		if env.Name == "STEP_NAME" && env.Value == "fetch" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("STEP_NAME env var not set on runner init container")
+	}
+
+	// Runner must mount both step-data (for outputs) and step-params (for inputs).
+	mounts := make(map[string]string)
+	for _, vm := range init.VolumeMounts {
+		mounts[vm.Name] = vm.MountPath
+	}
+	if mounts[stepVolumeName] != stepMountPath {
+		t.Errorf("missing or wrong step-data mount: %v", mounts)
+	}
+	if mounts[paramsVolumeName] != paramsMountPath {
+		t.Errorf("missing or wrong step-params mount: %v", mounts)
 	}
 }
 
@@ -143,22 +198,35 @@ func TestJobBuilder_Build_SharedVolume(t *testing.T) {
 	}
 
 	pod := job.Spec.Template.Spec
-	if len(pod.Volumes) != 1 {
-		t.Fatalf("expected 1 volume, got %d", len(pod.Volumes))
+
+	// Two volumes: step-data (emptyDir for outputs/auth) and step-params (ConfigMap for input params).
+	if len(pod.Volumes) != 2 {
+		t.Fatalf("expected 2 volumes, got %d", len(pod.Volumes))
 	}
-	if pod.Volumes[0].Name != "step-data" {
-		t.Errorf("expected volume name 'step-data', got %q", pod.Volumes[0].Name)
+	volByName := make(map[string]corev1.Volume)
+	for _, v := range pod.Volumes {
+		volByName[v.Name] = v
 	}
-	if pod.Volumes[0].EmptyDir == nil {
-		t.Error("expected emptyDir volume source")
+	if volByName[stepVolumeName].EmptyDir == nil {
+		t.Error("step-data should be an emptyDir")
+	}
+	if volByName[paramsVolumeName].ConfigMap == nil {
+		t.Error("step-params should be a ConfigMap volume")
+	}
+	if volByName[paramsVolumeName].ConfigMap.Name != "vol-task-params" {
+		t.Errorf("params ConfigMap name wrong: %q", volByName[paramsVolumeName].ConfigMap.Name)
 	}
 
-	// Init container should mount the volume.
-	if len(pod.InitContainers[0].VolumeMounts) != 1 {
-		t.Fatalf("expected 1 volume mount, got %d", len(pod.InitContainers[0].VolumeMounts))
+	// Runner init container should mount both volumes.
+	mounts := make(map[string]string)
+	for _, vm := range pod.InitContainers[0].VolumeMounts {
+		mounts[vm.Name] = vm.MountPath
 	}
-	if pod.InitContainers[0].VolumeMounts[0].MountPath != "/etc/step" {
-		t.Errorf("expected mount path '/etc/step', got %q", pod.InitContainers[0].VolumeMounts[0].MountPath)
+	if mounts[stepVolumeName] != stepMountPath {
+		t.Errorf("missing step-data mount: %v", mounts)
+	}
+	if mounts[paramsVolumeName] != paramsMountPath {
+		t.Errorf("missing step-params mount: %v", mounts)
 	}
 }
 

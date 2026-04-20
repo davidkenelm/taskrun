@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -26,11 +27,13 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	taskrunv1alpha1 "github.com/davidkenelm/taskrun/api/v1alpha1"
@@ -83,7 +86,12 @@ func (r *TaskRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, statusMgr.MarkFailed(ctx, &taskRun, "ValidationFailed", err.Error())
 	}
 
-	// 4. Partition steps: runner-based vs API-native
+	// 4. Validate step ordering: all runner steps must precede all API-native steps.
+	if err := ValidateStepOrdering(resolved); err != nil {
+		return ctrl.Result{}, statusMgr.MarkFailed(ctx, &taskRun, "InvalidStepOrdering", err.Error())
+	}
+
+	// 5. Partition steps: runner-based vs API-native
 	partitioned := PartitionSteps(resolved)
 
 	// Initialize step statuses on first reconcile.
@@ -94,7 +102,7 @@ func (r *TaskRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	// 5-7. Handle runner steps via Job/CronJob
+	// 6-8. Handle runner steps via Job/CronJob
 	if len(partitioned.Runner) > 0 {
 		// Scheduled TaskRuns use CronJobs.
 		if taskRun.Spec.Schedule != "" {
@@ -117,6 +125,10 @@ func (r *TaskRunReconciler) reconcileJob(ctx context.Context, taskRun *taskrunv1
 	err := r.Get(ctx, jobKey, &existingJob)
 
 	if apierrors.IsNotFound(err) {
+		// Write step params to a ConfigMap so runner containers can read them from a file.
+		if err := r.ensureParamsConfigMap(ctx, taskRun, partitioned.Runner); err != nil {
+			return ctrl.Result{}, statusMgr.MarkFailed(ctx, taskRun, "ParamsConfigMapFailed", err.Error())
+		}
 		// Create the Job.
 		job, err := builder.Build(taskRun, partitioned.Runner)
 		if err != nil {
@@ -145,11 +157,14 @@ func (r *TaskRunReconciler) reconcileJob(ctx context.Context, taskRun *taskrunv1
 	// Job exists — check completion.
 	if existingJob.Status.Succeeded > 0 {
 		log.Info("Runner Job completed successfully")
-		// Collect logs from runner pod.
 		r.collectRunnerLogs(ctx, taskRun, partitioned.Runner)
-		// Mark runner steps as Succeeded.
+		stepOutputs := r.collectRunnerOutputs(ctx, taskRun)
 		for _, rs := range partitioned.Runner {
-			statusMgr.MarkStepSucceeded(taskRun, rs.Step.Name, jobDuration(&existingJob), nil, rs.Step.Action)
+			var outputs map[string]string
+			if stepOutputs != nil {
+				outputs = stepOutputs[rs.Step.Name]
+			}
+			statusMgr.MarkStepSucceeded(taskRun, rs.Step.Name, jobDuration(&existingJob), outputs, rs.Step.Action)
 		}
 
 		// Now execute API-native steps.
@@ -256,6 +271,89 @@ func (r *TaskRunReconciler) executeOneStep(ctx context.Context, taskRun *taskrun
 
 	log.Info("Step succeeded", "step", rs.Step.Name, "action", rs.Step.Action, "duration", duration)
 	statusMgr.MarkStepSucceeded(taskRun, rs.Step.Name, duration, outputs, rs.Step.Action)
+	return nil
+}
+
+// ensureParamsConfigMap creates or updates a ConfigMap containing JSON params for each
+// runner step. The ConfigMap is mounted read-only at /etc/step/params/ in the Job pod,
+// so each runner container reads its params from /etc/step/params/<step-name>.json.
+func (r *TaskRunReconciler) ensureParamsConfigMap(ctx context.Context, taskRun *taskrunv1alpha1.TaskRun, runnerSteps []ResolvedStep) error {
+	data := make(map[string]string, len(runnerSteps))
+	for _, rs := range runnerSteps {
+		paramsJSON, err := json.Marshal(rs.Step.Params)
+		if err != nil {
+			return fmt.Errorf("marshalling params for step %q: %w", rs.Step.Name, err)
+		}
+		data[rs.Step.Name+".json"] = string(paramsJSON)
+	}
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      taskRun.Name + "-params",
+			Namespace: taskRun.Namespace,
+		},
+		Data: data,
+	}
+	if err := controllerutil.SetControllerReference(taskRun, cm, r.Scheme); err != nil {
+		return fmt.Errorf("setting owner reference on params ConfigMap: %w", err)
+	}
+
+	var existing corev1.ConfigMap
+	err := r.Get(ctx, types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace}, &existing)
+	if apierrors.IsNotFound(err) {
+		return r.Create(ctx, cm)
+	}
+	if err != nil {
+		return err
+	}
+	existing.Data = data
+	return r.Update(ctx, &existing)
+}
+
+// collectRunnerOutputs reads the collect-outputs container's stdout from the runner pod
+// and parses the TASKRUN_OUTPUTS= line written by the collector binary.
+// Returns a map of step-name → output-key → value, or nil if unavailable.
+func (r *TaskRunReconciler) collectRunnerOutputs(ctx context.Context, taskRun *taskrunv1alpha1.TaskRun) map[string]map[string]string {
+	if r.Clientset == nil {
+		return nil
+	}
+	log := logf.FromContext(ctx)
+
+	var podList corev1.PodList
+	if err := r.List(ctx, &podList,
+		client.InNamespace(taskRun.Namespace),
+		client.MatchingLabels{"taskrun.io/taskrun": taskRun.Name},
+	); err != nil || len(podList.Items) == 0 {
+		log.Error(err, "Failed to find runner pod for output collection")
+		return nil
+	}
+
+	pod := podList.Items[0]
+	req := r.Clientset.CoreV1().Pods(taskRun.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
+		Container: "collect-outputs",
+	})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		log.Error(err, "Failed to get collector container logs")
+		return nil
+	}
+	logBytes, err := io.ReadAll(stream)
+	_ = stream.Close()
+	if err != nil {
+		return nil
+	}
+
+	for line := range strings.SplitSeq(string(logBytes), "\n") {
+		if !strings.HasPrefix(line, outputsLogPrefix) {
+			continue
+		}
+		var allOutputs map[string]map[string]string
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, outputsLogPrefix)), &allOutputs); err != nil {
+			log.Error(err, "Failed to parse collector output line")
+			return nil
+		}
+		return allOutputs
+	}
 	return nil
 }
 

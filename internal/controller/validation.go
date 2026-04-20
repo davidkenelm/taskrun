@@ -25,6 +25,30 @@ import (
 	taskrunv1alpha1 "github.com/davidkenelm/taskrun/api/v1alpha1"
 )
 
+// ValidateStepOrdering enforces the v1alpha1 execution model: all runner steps must
+// precede all API-native steps. Interleaving (e.g. runner → api-native → runner) is
+// not supported because the controller batches all runner steps into a single Job and
+// runs API-native steps after Job completion. A runner step declared after an API-native
+// step would silently execute before it — this function makes that a hard error instead.
+func ValidateStepOrdering(steps []ResolvedStep) error {
+	seenAPINative := false
+	for _, rs := range steps {
+		isRunner := rs.Definition.Runner != nil
+		if isRunner && seenAPINative {
+			return fmt.Errorf(
+				"step %q (runner) cannot follow an API-native step: "+
+					"all runner steps must precede all API-native steps in v1alpha1; "+
+					"interleaved ordering is not supported",
+				rs.Step.Name,
+			)
+		}
+		if !isRunner {
+			seenAPINative = true
+		}
+	}
+	return nil
+}
+
 // ValidateStepParams validates each resolved step's params against its StepDefinition schema.
 // Returns a combined error listing all validation failures.
 func ValidateStepParams(steps []ResolvedStep) error {
