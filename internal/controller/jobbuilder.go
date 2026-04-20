@@ -29,14 +29,14 @@ import (
 )
 
 const (
-	stepVolumeName  = "step-data"
-	stepMountPath   = "/etc/step"
-	authMountPath   = "/etc/step/auth"
+	stepVolumeName   = "step-data"
+	stepMountPath    = "/etc/step"
+	authMountPath    = "/etc/step/auth"
 	paramsVolumeName = "step-params"
 	paramsMountPath  = "/etc/step/params"
-	collectorImage  = "ghcr.io/davidkenelm/taskrun-runners/collector:0.1.0"
+	collectorImage   = "ghcr.io/davidkenelm/taskrun-runners/collector:0.1.0"
 	outputsLogPrefix = "TASKRUN_OUTPUTS="
-	maxLogLines     = 100
+	maxLogLines      = 100
 )
 
 // PartitionedSteps separates resolved steps into runner-based and API-native.
@@ -84,10 +84,7 @@ func (b *JobBuilder) Build(taskRun *taskrunv1alpha1.TaskRun, runnerSteps []Resol
 		return nil, nil
 	}
 
-	initContainers, err := b.buildInitContainers(taskRun, runnerSteps)
-	if err != nil {
-		return nil, err
-	}
+	initContainers := b.buildInitContainers(taskRun, runnerSteps)
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
@@ -155,7 +152,7 @@ func (b *JobBuilder) BuildCronJob(taskRun *taskrunv1alpha1.TaskRun, runnerSteps 
 	return cronJob, nil
 }
 
-func (b *JobBuilder) buildInitContainers(taskRun *taskrunv1alpha1.TaskRun, steps []ResolvedStep) ([]corev1.Container, error) {
+func (b *JobBuilder) buildInitContainers(taskRun *taskrunv1alpha1.TaskRun, steps []ResolvedStep) []corev1.Container {
 	var containers []corev1.Container
 
 	// Auth init container if auth block is present.
@@ -179,7 +176,7 @@ func (b *JobBuilder) buildInitContainers(taskRun *taskrunv1alpha1.TaskRun, steps
 		}
 		containers = append(containers, c)
 	}
-	return containers, nil
+	return containers
 }
 
 func (b *JobBuilder) authInitContainer(auth *taskrunv1alpha1.AuthSpec) corev1.Container {

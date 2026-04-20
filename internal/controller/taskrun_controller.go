@@ -343,7 +343,7 @@ func (r *TaskRunReconciler) collectRunnerOutputs(ctx context.Context, taskRun *t
 		return nil
 	}
 
-	for _, line := range strings.Split(string(logBytes), "\n") {
+	for line := range strings.SplitSeq(string(logBytes), "\n") {
 		if !strings.HasPrefix(line, outputsLogPrefix) {
 			continue
 		}

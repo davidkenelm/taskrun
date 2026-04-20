@@ -224,4 +224,3 @@ func TestValidateStepOrdering_Empty(t *testing.T) {
 		t.Fatalf("empty steps should be valid: %v", err)
 	}
 }
-
