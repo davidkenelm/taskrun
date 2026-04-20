@@ -27,6 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
+const restartedTrue = "true"
+
 func TestExecutor_SecretUpdate_Create(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(newTestScheme()).Build()
 	executor := NewStepExecutor(c, "default")
@@ -154,7 +156,7 @@ func TestExecutor_RolloutRestart_Deployment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if outputs["restarted"] != "true" {
+	if outputs["restarted"] != restartedTrue {
 		t.Errorf("expected restarted=true, got %q", outputs["restarted"])
 	}
 
@@ -251,6 +253,113 @@ func TestExecutor_UnknownAction(t *testing.T) {
 	_, err := executor.Execute(context.Background(), "unknown-action", map[string]string{})
 	if err == nil {
 		t.Fatal("expected error for unknown action")
+	}
+}
+
+func TestExecutor_RolloutRestart_StatefulSet(t *testing.T) {
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-db", Namespace: "default"},
+		Spec: appsv1.StatefulSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "my-db"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "my-db"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "db", Image: "postgres:16"}}},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(sts).Build()
+	executor := NewStepExecutor(c, "default")
+
+	outputs, err := executor.Execute(context.Background(), "rollout-restart", map[string]string{
+		"kind": "StatefulSet",
+		"name": "my-db",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outputs["restarted"] != restartedTrue {
+		t.Errorf("expected restarted=true, got %q", outputs["restarted"])
+	}
+
+	var updated appsv1.StatefulSet
+	_ = c.Get(context.Background(), types.NamespacedName{Name: "my-db", Namespace: "default"}, &updated)
+	if _, ok := updated.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]; !ok {
+		t.Error("restart annotation not set on StatefulSet")
+	}
+}
+
+func TestExecutor_RolloutRestart_DaemonSet(t *testing.T) {
+	ds := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-agent", Namespace: "default"},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "agent"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "agent"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "agent", Image: "agent:v1"}}},
+			},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(ds).Build()
+	executor := NewStepExecutor(c, "default")
+
+	outputs, err := executor.Execute(context.Background(), "rollout-restart", map[string]string{
+		"kind": "DaemonSet",
+		"name": "my-agent",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outputs["restarted"] != restartedTrue {
+		t.Errorf("expected restarted=true, got %q", outputs["restarted"])
+	}
+
+	var updated appsv1.DaemonSet
+	_ = c.Get(context.Background(), types.NamespacedName{Name: "my-agent", Namespace: "default"}, &updated)
+	if _, ok := updated.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]; !ok {
+		t.Error("restart annotation not set on DaemonSet")
+	}
+}
+
+func TestExecutor_RolloutRestart_NotFound(t *testing.T) {
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).Build()
+	executor := NewStepExecutor(c, "default")
+
+	_, err := executor.Execute(context.Background(), "rollout-restart", map[string]string{
+		"kind": "Deployment",
+		"name": "ghost",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-existent Deployment")
+	}
+}
+
+func TestExecutor_ConfigMapUpdate_Patch(t *testing.T) {
+	existing := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-config", Namespace: "default"},
+		Data:       map[string]string{"existing-key": "existing-val"},
+	}
+	c := fake.NewClientBuilder().WithScheme(newTestScheme()).WithObjects(existing).Build()
+	executor := NewStepExecutor(c, "default")
+
+	outputs, err := executor.Execute(context.Background(), "configmap-update", map[string]string{
+		"configMapName": "my-config",
+		"key":           "new-key",
+		"value":         "new-val",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if outputs["updated"] != "patched" {
+		t.Errorf("expected 'patched', got %q", outputs["updated"])
+	}
+
+	var cm corev1.ConfigMap
+	_ = c.Get(context.Background(), types.NamespacedName{Name: "my-config", Namespace: "default"}, &cm)
+	if cm.Data["new-key"] != "new-val" {
+		t.Errorf("new key not set: %v", cm.Data)
+	}
+	if cm.Data["existing-key"] != "existing-val" {
+		t.Errorf("existing key was lost: %v", cm.Data)
 	}
 }
 
