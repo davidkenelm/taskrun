@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -142,3 +143,85 @@ func TestValidateStepParams_MultipleSteps_OneInvalid(t *testing.T) {
 		t.Fatal("expected error when one step has invalid params")
 	}
 }
+
+// --- ValidateStepOrdering tests ---
+
+func runner(name string) ResolvedStep {
+	return ResolvedStep{
+		Step:       taskrunv1alpha1.StepSpec{Name: name},
+		Definition: taskrunv1alpha1.StepDefinitionSpec{Runner: &taskrunv1alpha1.RunnerSpec{Image: "img:v1"}},
+	}
+}
+
+func apiNative(name string) ResolvedStep {
+	return ResolvedStep{
+		Step:       taskrunv1alpha1.StepSpec{Name: name},
+		Definition: taskrunv1alpha1.StepDefinitionSpec{},
+	}
+}
+
+func TestValidateStepOrdering_AllRunners(t *testing.T) {
+	steps := []ResolvedStep{runner("a"), runner("b"), runner("c")}
+	if err := ValidateStepOrdering(steps); err != nil {
+		t.Fatalf("all-runner ordering should be valid: %v", err)
+	}
+}
+
+func TestValidateStepOrdering_AllAPINative(t *testing.T) {
+	steps := []ResolvedStep{apiNative("a"), apiNative("b")}
+	if err := ValidateStepOrdering(steps); err != nil {
+		t.Fatalf("all-api-native ordering should be valid: %v", err)
+	}
+}
+
+func TestValidateStepOrdering_RunnersThenAPINative(t *testing.T) {
+	steps := []ResolvedStep{runner("fetch"), runner("query"), apiNative("store"), apiNative("restart")}
+	if err := ValidateStepOrdering(steps); err != nil {
+		t.Fatalf("runners-then-api-native ordering should be valid: %v", err)
+	}
+}
+
+func TestValidateStepOrdering_APINativeThenRunner(t *testing.T) {
+	steps := []ResolvedStep{apiNative("store"), runner("fetch")}
+	if err := ValidateStepOrdering(steps); err == nil {
+		t.Fatal("api-native followed by runner should be invalid")
+	}
+}
+
+func TestValidateStepOrdering_InterleavedRunnerAPINativeRunner(t *testing.T) {
+	steps := []ResolvedStep{runner("fetch"), apiNative("store"), runner("notify")}
+	err := ValidateStepOrdering(steps)
+	if err == nil {
+		t.Fatal("interleaved runner-api-native-runner should be invalid")
+	}
+	// Error must name the offending step.
+	if !strings.Contains(err.Error(), "notify") {
+		t.Errorf("error should name offending step 'notify', got: %v", err)
+	}
+}
+
+func TestValidateStepOrdering_InterleavedAPINativeRunnerAPINative(t *testing.T) {
+	steps := []ResolvedStep{apiNative("store"), runner("fetch"), apiNative("restart")}
+	if err := ValidateStepOrdering(steps); err == nil {
+		t.Fatal("interleaved api-native-runner-api-native should be invalid")
+	}
+}
+
+func TestValidateStepOrdering_SingleRunner(t *testing.T) {
+	if err := ValidateStepOrdering([]ResolvedStep{runner("only")}); err != nil {
+		t.Fatalf("single runner should be valid: %v", err)
+	}
+}
+
+func TestValidateStepOrdering_SingleAPINative(t *testing.T) {
+	if err := ValidateStepOrdering([]ResolvedStep{apiNative("only")}); err != nil {
+		t.Fatalf("single api-native should be valid: %v", err)
+	}
+}
+
+func TestValidateStepOrdering_Empty(t *testing.T) {
+	if err := ValidateStepOrdering(nil); err != nil {
+		t.Fatalf("empty steps should be valid: %v", err)
+	}
+}
+

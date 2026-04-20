@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -30,10 +29,14 @@ import (
 )
 
 const (
-	stepVolumeName = "step-data"
-	stepMountPath  = "/etc/step"
-	authMountPath  = "/etc/step/auth"
-	maxLogLines    = 100
+	stepVolumeName  = "step-data"
+	stepMountPath   = "/etc/step"
+	authMountPath   = "/etc/step/auth"
+	paramsVolumeName = "step-params"
+	paramsMountPath  = "/etc/step/params"
+	collectorImage  = "ghcr.io/davidkenelm/taskrun-runners/collector:0.1.0"
+	outputsLogPrefix = "TASKRUN_OUTPUTS="
+	maxLogLines     = 100
 )
 
 // PartitionedSteps separates resolved steps into runner-based and API-native.
@@ -103,9 +106,12 @@ func (b *JobBuilder) Build(taskRun *taskrunv1alpha1.TaskRun, runnerSteps []Resol
 					InitContainers: initContainers,
 					Containers: []corev1.Container{
 						{
-							Name:    "complete",
-							Image:   "gcr.io/google_containers/pause:3.2",
-							Command: []string{"/pause"},
+							Name:    "collect-outputs",
+							Image:   collectorImage,
+							Command: []string{"/collector"},
+							VolumeMounts: []corev1.VolumeMount{
+								{Name: stepVolumeName, MountPath: stepMountPath},
+							},
 						},
 					},
 					Volumes: b.buildVolumes(taskRun),
@@ -159,24 +165,16 @@ func (b *JobBuilder) buildInitContainers(taskRun *taskrunv1alpha1.TaskRun, steps
 
 	// One init container per runner step, in order.
 	for i, rs := range steps {
-		paramsJSON, err := json.Marshal(rs.Step.Params)
-		if err != nil {
-			return nil, fmt.Errorf("marshalling params for step %q: %w", rs.Step.Name, err)
-		}
-
 		c := corev1.Container{
-			Name:  fmt.Sprintf("step-%d-%s", i, rs.Step.Name),
-			Image: rs.Definition.Runner.Image,
-			Command: []string{
-				"/runner",
-				"--step-name", rs.Step.Name,
-				"--params", string(paramsJSON),
+			Name:    fmt.Sprintf("step-%d-%s", i, rs.Step.Name),
+			Image:   rs.Definition.Runner.Image,
+			Command: []string{"/runner"},
+			Env: []corev1.EnvVar{
+				{Name: "STEP_NAME", Value: rs.Step.Name},
 			},
 			VolumeMounts: []corev1.VolumeMount{
-				{
-					Name:      stepVolumeName,
-					MountPath: stepMountPath,
-				},
+				{Name: stepVolumeName, MountPath: stepMountPath},
+				{Name: paramsVolumeName, MountPath: paramsMountPath, ReadOnly: true},
 			},
 		}
 		containers = append(containers, c)
@@ -217,16 +215,25 @@ func (b *JobBuilder) authInitContainer(auth *taskrunv1alpha1.AuthSpec) corev1.Co
 	return c
 }
 
-func (b *JobBuilder) buildVolumes(_ *taskrunv1alpha1.TaskRun) []corev1.Volume {
-	volumes := []corev1.Volume{
+func (b *JobBuilder) buildVolumes(taskRun *taskrunv1alpha1.TaskRun) []corev1.Volume {
+	return []corev1.Volume{
 		{
 			Name: stepVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
 		},
+		{
+			Name: paramsVolumeName,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: taskRun.Name + "-params",
+					},
+				},
+			},
+		},
 	}
-	return volumes
 }
 
 func jobName(taskRun *taskrunv1alpha1.TaskRun) string {

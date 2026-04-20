@@ -40,6 +40,73 @@ Resolution order: namespace-local `StepDefinition` first, then `ClusterStepDefin
 | **Runner** | `spec.runner` is set on the StepDefinition | Runs as an init container inside a Job pod. Reads params from `/etc/step/params.json`, writes outputs to `/etc/step/outputs/<name>.json`. Steps share an `emptyDir` volume at `/etc/step`. |
 | **API-native** | No `spec.runner` | Executed directly in the controller process. No Job is created. Used for Kubernetes API operations (secrets, configmaps, rollout restarts, waits). |
 
+### Step ordering — the two-phase execution model
+
+> **This is the most important constraint to understand before writing a TaskRun.**
+
+The controller executes steps in two phases, regardless of their declared order:
+
+1. **Phase 1 — All runner steps** are batched into a single Kubernetes Job and run as sequential init containers.
+2. **Phase 2 — All API-native steps** execute in-process in the controller, after the Job completes.
+
+This means **interleaving runner and API-native steps is not allowed.** All runner steps must be declared before all API-native steps. The controller enforces this at reconcile time and fails with `InvalidStepOrdering` if the constraint is violated.
+
+#### Valid orderings
+
+```yaml
+# ✓ All runners, then all API-natives
+steps:
+  - name: fetch       # runner
+  - name: query       # runner  (custom)
+  - name: store       # API-native
+  - name: restart     # API-native
+
+# ✓ Runners only
+steps:
+  - name: fetch       # runner
+  - name: notify      # runner  (custom)
+
+# ✓ API-natives only
+steps:
+  - name: read        # API-native
+  - name: update      # API-native
+  - name: restart     # API-native
+```
+
+#### Invalid orderings — rejected at reconcile time
+
+```yaml
+# ✗ Runner after API-native
+steps:
+  - name: store       # API-native
+  - name: notify      # runner ← rejected: "step "notify" (runner) cannot follow
+                      #           an API-native step"
+
+# ✗ Interleaved
+steps:
+  - name: fetch       # runner
+  - name: store       # API-native
+  - name: notify      # runner ← rejected
+```
+
+#### Template chaining across phases
+
+Because Phase 1 completes before Phase 2 begins, runner outputs **are** available to API-native steps via template expressions:
+
+```yaml
+steps:
+  - name: fetch-data    # runner — produces output "body"
+    action: http-request
+    outputs: [body]
+
+  - name: store-result  # API-native — can reference runner output ✓
+    action: secret-update
+    params:
+      value: "{{ steps.fetch-data.outputs.body }}"
+```
+
+The reverse — an API-native step's output referenced by a runner step — is **not possible**, because the runner Job is created and executes before any API-native step runs.
+
 ### Template expressions
 
 Step params can reference outputs from earlier steps:
@@ -269,24 +336,36 @@ status:
                          │                                          │
                          │  1. Resolve StepDefinitions              │
                          │  2. Validate params (JSON Schema)        │
-                         │  3. Partition: runner vs API-native      │
-                         │  4a. Runner steps → create Job/CronJob  │
-                         │  4b. API-native steps → execute inline  │
-                         │  5. Collect runner logs                  │
+                         │  3. Validate step ordering               │
+                         │  4. Partition: runner vs API-native      │
+                         │                                          │
+                         │  ┌── PHASE 1 ────────────────────────┐  │
+                         │  │  Runner steps → Job / CronJob     │  │
+                         │  │  (all runners batch into one Job) │  │
+                         │  └───────────────────────────────────┘  │
+                         │                  ▼ Job completes         │
+                         │  ┌── PHASE 2 ────────────────────────┐  │
+                         │  │  API-native steps → in-process    │  │
+                         │  │  (sequential, with template res.) │  │
+                         │  └───────────────────────────────────┘  │
+                         │                                          │
+                         │  5. Collect logs + outputs               │
                          │  6. Write status + conditions + metrics  │
                          └────────┬──────────────────┬─────────────┘
                                   │                  │
                ┌──────────────────▼───┐   ┌──────────▼──────────────┐
-               │   Kubernetes Job /   │   │   API-native executors  │
-               │      CronJob         │   │                         │
+               │  PHASE 1             │   │  PHASE 2                │
+               │  Kubernetes Job /    │   │  API-native executors   │
+               │  CronJob             │   │                         │
                │                      │   │  secret-update          │
                │  ┌────────────────┐  │   │  secret-read            │
                │  │  auth init     │  │   │  rollout-restart        │
                │  │  step-0-fetch  │  │   │  configmap-update       │
-               │  │  step-1-store  │  │   │  wait                   │
-               │  └────────────────┘  │   └─────────────────────────┘
-               │   shared emptyDir    │
-               │   /etc/step/         │
+               │  │  step-1-notify │  │   │  wait                   │
+               │  │  collect-out   │  │   └─────────────────────────┘
+               │  └────────────────┘  │   (runs after Job completes)
+               │  /etc/step/ emptyDir │
+               │  /etc/step/params/   │
                └──────────────────────┘
 ```
 
@@ -295,10 +374,11 @@ status:
 1. **Fetch** the `TaskRun`; skip if already terminal (Succeeded/Failed)
 2. **Resolve** each step's `action` → `StepDefinitionSpec` (namespace-local first, then cluster-scoped)
 3. **Validate** each step's `params` against the resolved JSON Schema
-4. **Partition** steps into runner-based and API-native
-5. **Runner steps** — create a `Job` (or `CronJob` if scheduled); requeue until complete; collect logs on finish
-6. **API-native steps** — execute sequentially in-process, resolving template expressions before each step
-7. **Status** — write per-step phase, duration, outputs, and logs; set `TaskRun.status.phase` and conditions; record Prometheus metrics
+4. **Validate step ordering** — all runner steps must precede all API-native steps; fail with `InvalidStepOrdering` if interleaved
+5. **Partition** steps into runner-based and API-native
+6. **Phase 1 — Runner steps** — write params ConfigMap; create a `Job` (or `CronJob` if scheduled); requeue until the Job completes; collect per-step logs and outputs from the collector container
+7. **Phase 2 — API-native steps** — execute sequentially in-process after Phase 1 completes; template expressions in params are resolved against runner step outputs before each step runs
+8. **Status** — write per-step phase, duration, outputs, and logs; set `TaskRun.status.phase` and conditions; record Prometheus metrics
 
 ## Installation
 
