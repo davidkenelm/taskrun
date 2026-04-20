@@ -1,3 +1,6 @@
+# Note Before Reading
+This project is extremely young, and as such is subject to frequent changes- even bottom up redesign. In this state, TaskRun is more of a implementation study of a Kubernetes Operator using GoLang. Until an official V1 is tagged and released, this should NOT be used in any production environments. This repository is public for the purpose of user based feedback and contribution. I am one guy, so feel free to put up recommendations, or even an MR if you feel like contributing!
+
 # TaskRun Operator
 
 A Kubernetes operator that replaces raw Jobs and CronJobs with a declarative, typed alternative. Instead of embedding shell scripts in YAML, you compose named steps from reusable `StepDefinition` types, wire outputs between steps using template expressions, and let the operator handle scheduling, execution, status tracking, and log collection.
